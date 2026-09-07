@@ -6,7 +6,7 @@ KIOSK_USER=lvuser
 
 sudo apt-get update
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-  python3-pygame python3-pyscard python3-speechd sqlite3 \
+  python3-pygame python3-pyscard python3-speechd sqlite3 espeak-ng \
   xserver-xorg xinit openbox x11-xserver-utils \
   pcscd libccid \
   pipewire pipewire-pulse wireplumber \

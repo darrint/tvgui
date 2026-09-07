@@ -27,9 +27,27 @@ STATUS_BG = (0x3A, 0x0A, 0x0A)
 
 def say(phrase):
     try:
-        subprocess.run(["spd-say", "-w", "-r", "-20", "--", phrase], check=False)
+        proc = subprocess.run(
+            ["espeak-ng", "-s", "140", "--stdout", "--", phrase],
+            capture_output=True,
+            check=False,
+        )
+        if not proc.stdout:
+            print("espeak-ng: empty", flush=True)
+            return
+        env = os.environ.copy()
+        runtime = env.get("XDG_RUNTIME_DIR") or "/run/user/1001"
+        env.setdefault("XDG_RUNTIME_DIR", runtime)
+        env.setdefault("PIPEWIRE_RUNTIME_DIR", runtime)
+        env.setdefault("PULSE_SERVER", f"unix:{runtime}/pulse/native")
+        subprocess.run(
+            ["pw-play", "--target", "alsa-hdmi", "-"],
+            input=proc.stdout,
+            env=env,
+            check=False,
+        )
     except OSError as e:
-        print(f"spd-say: {e}", flush=True)
+        print(f"say: {e}", flush=True)
 
 
 def say_paused(lead, name):
