@@ -68,20 +68,20 @@ class Store:
 
     def who(self):
         rows = self.conn.execute(
-            """SELECT p.username, p.name, p.pronounce, p.role
-               FROM people p
-               JOIN (
-                 SELECT username, MAX(id) AS id FROM punches GROUP BY username
-               ) last ON last.username = p.username
-               JOIN punches x ON x.id = last.id
-               WHERE x.direction = 'in'
-               ORDER BY p.name COLLATE NOCASE"""
+            """SELECT p.username, p.name, p.pronounce, p.role, x.ts
+                FROM people p
+                JOIN (
+                  SELECT username, MAX(id) AS id FROM punches GROUP BY username
+                ) last ON last.username = p.username
+                JOIN punches x ON x.id = last.id
+                WHERE x.direction = 'in'
+                ORDER BY p.name COLLATE NOCASE"""
         ).fetchall()
         out = []
-        for username, name, pronounce, role in rows:
+        for username, name, pronounce, role, ts in rows:
             m = Member.new(name, username, pronounce, Role.parse(role) or Role.STUDENT)
             if m:
-                out.append(m)
+                out.append((m, ts))
         return out
 
 

@@ -42,6 +42,7 @@ sudo mkdir -p "/home/${KIOSK_USER}/.config/pipewire/pipewire.conf.d"
 sudo cp "$ROOT/deploy/pipewire-hdmi.conf" "/home/${KIOSK_USER}/.config/pipewire/pipewire.conf.d/hdmi.conf"
 sudo chown -R "${KIOSK_USER}:${KIOSK_USER}" "/home/${KIOSK_USER}/.config"
 sudo chown -R "${KIOSK_USER}:${KIOSK_USER}" /var/lib/tvgui
+sudo timedatectl set-timezone America/New_York
 sudo loginctl enable-linger "$KIOSK_USER"
 sudo systemctl enable --now pcscd.socket seatd pw-hdmi-hold
 sudo systemctl daemon-reload

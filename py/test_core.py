@@ -79,7 +79,7 @@ class StoreTests(unittest.TestCase):
         m = Member.new("Jane Doe", "jdoe", None, Role.STUDENT)
         p = self.store.toggle(m, 1000, 2)
         self.assertEqual(p.direction, IN)
-        self.assertEqual(self.store.who(), [m])
+        self.assertEqual(self.store.who(), [(m, 1000)])
         p = self.store.toggle(m, 1003, 2)
         self.assertEqual(p.direction, OUT)
         self.assertEqual(self.store.who(), [])

@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import datetime
 import io
 import os
 import queue
@@ -215,7 +216,19 @@ def open_display():
     return win, renderer
 
 
-def compose(size, font_big, font_mid, font_sm, mentors, students, parents, status):
+def local_midnight():
+    n = datetime.datetime.now().astimezone()
+    return int(n.replace(hour=0, minute=0, second=0, microsecond=0).timestamp())
+
+
+def fmt_in(ts, now):
+    start = max(int(ts), local_midnight())
+    mins = max(0, now - start) // 60
+    h, m = divmod(mins, 60)
+    return f"{h}:{m:02d}"
+
+
+def compose(size, font_big, font_mid, font_sm, mentors, students, parents, status, now):
     import pygame
 
     w, h = size
@@ -245,8 +258,11 @@ def compose(size, font_big, font_mid, font_sm, mentors, students, parents, statu
         pygame.draw.rect(surf, PANEL, rect)
         surf.blit(font_sm.render(label, True, BEIGE), (rect.x + 20, rect.y + 16))
         y = rect.y + 56
-        for name in names:
-            surf.blit(font_big.render(name, True, INK), (rect.x + 20, y))
+        for name, ts in names:
+            ns = font_big.render(name, True, INK)
+            surf.blit(ns, (rect.x + 20, y))
+            dur = font_sm.render(fmt_in(ts, now), True, BEIGE)
+            surf.blit(dur, (rect.x + 28 + ns.get_width(), y + 12))
             y += 48
 
     st = pygame.Rect(pad, h - pad - status_h, w - pad * 2, status_h)
@@ -294,10 +310,13 @@ def kiosk():
     font_sm = pygame.font.Font(FONT, 22)
     status = "Waiting for reader"
     size = (W, H)
-    surf = compose(size, font_big, font_mid, font_sm, mentors, students, parents, status)
+    now = int(time.time())
+    surf = compose(
+        size, font_big, font_mid, font_sm, mentors, students, parents, status, now
+    )
     tex = present(renderer, surf)
     save_ui(surf, state)
-    key = (tuple(mentors), tuple(students), tuple(parents), status)
+    key = (tuple(mentors), tuple(students), tuple(parents), status, now // 60)
     last_active = time.monotonic()
     blanked = False
     drew_black = False
@@ -363,7 +382,15 @@ def kiosk():
             state["mentors"] = mentors
             state["students"] = students
             state["parents"] = parents
-        new_key = (tuple(mentors), tuple(students), tuple(parents), status, blanked)
+        now = int(time.time())
+        new_key = (
+            tuple(mentors),
+            tuple(students),
+            tuple(parents),
+            status,
+            blanked,
+            now // 60,
+        )
         try:
             if blanked:
                 if not drew_black:
@@ -377,7 +404,15 @@ def kiosk():
             elif new_key != key:
                 key = new_key
                 surf = compose(
-                    size, font_big, font_mid, font_sm, mentors, students, parents, status
+                    size,
+                    font_big,
+                    font_mid,
+                    font_sm,
+                    mentors,
+                    students,
+                    parents,
+                    status,
+                    now,
                 )
                 tex = present(renderer, surf)
                 save_ui(surf, state)
