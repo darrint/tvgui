@@ -1,7 +1,7 @@
 [Unit]
 Description=tvgui HDMI kiosk (Xorg + openbox + pygame)
-After=seatd.service pcscd.socket pipewire-pulse.service
-Wants=seatd.service pcscd.socket pipewire-pulse.service
+After=seatd.service pcscd.socket
+Wants=seatd.service pcscd.socket
 
 [Service]
 User=lvuser
