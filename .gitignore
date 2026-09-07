@@ -1,0 +1,13 @@
+/.direnv
+/target/
+result*
+*.swp
+.DS_Store
+/.cache/
+attendance.sqlite
+*.sqlite
+__pycache__/
+*.pyc
+kiosk.env
+*.secret
+*.ics

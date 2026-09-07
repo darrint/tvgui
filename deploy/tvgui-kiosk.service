@@ -1,0 +1,21 @@
+[Unit]
+Description=tvgui HDMI kiosk (Xorg + openbox + pygame)
+After=seatd.service pcscd.socket pipewire-pulse.service
+Wants=seatd.service pcscd.socket pipewire-pulse.service
+
+[Service]
+User=lvuser
+Group=lvuser
+SupplementaryGroups=video render input audio
+Environment=HOME=/home/lvuser
+Environment=XDG_RUNTIME_DIR=/run/user/1001
+EnvironmentFile=-/etc/tvgui/kiosk.env
+WorkingDirectory=/var/lib/tvgui
+RuntimeDirectory=tvgui
+RuntimeDirectoryMode=0755
+ExecStart=/usr/bin/xinit /usr/local/share/tvgui/xsession.sh -- :0 vt7 -nolisten tcp
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
