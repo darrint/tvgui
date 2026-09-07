@@ -4,7 +4,7 @@ import threading
 from queue import Queue, Empty
 
 from member import Member, Role
-from nfc import DumpReq, EnrollReq
+from nfc import DumpReq, EnrollReq, ScanReq
 
 
 def socket_path():
@@ -57,6 +57,22 @@ def _handle(conn, enroll_slot, event_q, state):
             return
         if cmd == "STATUS":
             f.write(_status_text(state).encode())
+            f.flush()
+            return
+        if cmd == "SCAN":
+            reply = Queue()
+            if not enroll_slot.offer(ScanReq(reply)):
+                f.write(b"ERR enroll already pending\n")
+                f.flush()
+                return
+            try:
+                text = reply.get(timeout=300)
+            except Empty:
+                enroll_slot.clear()
+                f.write(b"ERR timed out\n")
+                f.flush()
+                return
+            f.write(text.encode() if isinstance(text, str) else text)
             f.flush()
             return
         if cmd == "DUMP":
@@ -151,9 +167,9 @@ def enroll_client(member):
     raise RuntimeError(line[4:] if line.startswith("ERR ") else line)
 
 
-def kiosk_cmd(cmd):
+def kiosk_cmd(cmd, timeout=5):
     sock = _connect()
-    sock.settimeout(5)
+    sock.settimeout(timeout)
     sock.sendall(cmd.encode() + b"\n")
     data = sock.makefile().read()
     sock.close()

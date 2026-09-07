@@ -272,6 +272,39 @@ def write_member(conn, member):
     protect(conn)
 
 
+def scan_report(conn):
+    info = inspect_tag(conn)
+    member = None
+    try:
+        member = read_member(conn)
+    except Exception:
+        member = None
+    access = None
+    if info["cfg0"] is not None:
+        try:
+            access = read_pages(conn, info["cfg0"] + 1)[0]
+        except Exception:
+            pass
+    prot = None if access is None else bool(access & 0x80)
+    standard = (
+        info["auth0"] == AUTH0_USER
+        and prot is False
+        and member is not None
+    )
+    lines = ["OK" if standard else "REENROLL"]
+    if member:
+        lines.append(f"name={member.name}")
+        lines.append(f"username={member.username}")
+        lines.append(f"role={member.role}")
+        lines.append(f"url={member.to_url()}")
+    else:
+        lines.extend(["name=", "username=", "role=", "url="])
+    lines.append(f"AUTH0={info['auth0']:02x}")
+    lines.append(f"ACCESS={access:02x}" if access is not None else "ACCESS=")
+    lines.append(f"uid={info['uid'].hex()}")
+    return "\n".join(lines) + "\n", member
+
+
 def dump_tag(conn):
     lines = []
     for p in range(0, 16, 4):
@@ -344,6 +377,11 @@ class DumpReq:
         self.reply_q = reply_q
 
 
+class ScanReq:
+    def __init__(self, reply_q):
+        self.reply_q = reply_q
+
+
 class EnrollSlot:
     def __init__(self):
         self.lock = threading.Lock()
@@ -387,6 +425,38 @@ def _run(store, enroll_slot, event_q):
         event_q.put(("status", "Hold your badge over the reader"))
         while _acr_reader() is not None:
             job = enroll_slot.take()
+            if isinstance(job, ScanReq):
+                event_q.put(("status", "Scan: hold tag"))
+                done = False
+                err = "timed out"
+                for _ in range(1200):
+                    conn = connect_reader(reader)
+                    if conn:
+                        try:
+                            text, member = scan_report(conn)
+                            if member:
+                                event_q.put(("speak", member.pronounce))
+                            event_q.put(("status", text.split("\n")[0]))
+                            job.reply_q.put(text)
+                            done = True
+                        except Exception as e:
+                            err = str(e)
+                            job.reply_q.put(f"ERR {e}\n")
+                            done = True
+                        try:
+                            conn.disconnect()
+                        except Exception:
+                            pass
+                        while connect_reader(reader) is not None:
+                            time.sleep(0.25)
+                        hold_status = True
+                        break
+                    time.sleep(0.25)
+                if not done:
+                    job.reply_q.put(f"ERR {err}\n")
+                    hold_status = True
+                active = None
+                continue
             if isinstance(job, DumpReq):
                 event_q.put(("status", "Dump: hold tag"))
                 dumped = False

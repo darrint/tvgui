@@ -70,7 +70,7 @@ def usage():
         "tvgui.py enroll --name NAME --username USER --role mentor|student|parent [--pronounce TEXT]",
         file=sys.stderr,
     )
-    print("tvgui.py blank|unblank|status|dump", file=sys.stderr)
+    print("tvgui.py blank|unblank|status|dump|scan", file=sys.stderr)
 
 
 def blank_secs():
@@ -351,6 +351,14 @@ def main():
     cmd = args[0] if args else "kiosk"
     if cmd in ("kiosk",):
         kiosk()
+    elif cmd == "scan":
+        try:
+            while True:
+                sys.stdout.write(kiosk_cmd("SCAN", timeout=300))
+                sys.stdout.write("---\n")
+                sys.stdout.flush()
+        except KeyboardInterrupt:
+            pass
     elif cmd in ("blank", "unblank", "status", "dump"):
         try:
             sys.stdout.write(kiosk_cmd(cmd.upper()))
