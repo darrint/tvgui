@@ -23,6 +23,12 @@ class MemberTests(unittest.TestCase):
         )
         self.assertEqual(m.role, Role.STUDENT)
 
+    def test_parent_role(self):
+        m = Member.new("Pat Parent", "pparent", None, Role.PARENT)
+        self.assertEqual(m.role, Role.PARENT)
+        self.assertIn("role=parent", m.to_url())
+        self.assertEqual(Member.from_url(m.to_url()), m)
+
 
 class NdefTests(unittest.TestCase):
     def test_pages(self):

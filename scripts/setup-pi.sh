@@ -51,5 +51,5 @@ if [[ ! -f /etc/tvgui/kiosk.env ]]; then
   echo "Missing /etc/tvgui/kiosk.env — add TVGUI_TAG_SECRET=... (Vaultwarden item badge-kiosk NTAG)"
 fi
 echo "Then: sudo systemctl start tvgui-kiosk"
-echo "Enroll: python3 /usr/local/share/tvgui/tvgui.py enroll --name NAME --username USER --role student"
+echo "Enroll: python3 /usr/local/share/tvgui/tvgui.py enroll --name NAME --username USER --role student|mentor|parent"
 echo "SQLite: sqlite3 /var/lib/tvgui/attendance.sqlite"

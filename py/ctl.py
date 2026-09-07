@@ -4,7 +4,7 @@ import threading
 from queue import Queue, Empty
 
 from member import Member, Role
-from nfc import EnrollReq
+from nfc import DumpReq, EnrollReq
 
 
 def socket_path():
@@ -59,6 +59,22 @@ def _handle(conn, enroll_slot, event_q, state):
             f.write(_status_text(state).encode())
             f.flush()
             return
+        if cmd == "DUMP":
+            reply = Queue()
+            if not enroll_slot.offer(DumpReq(reply)):
+                f.write(b"ERR enroll already pending\n")
+                f.flush()
+                return
+            try:
+                text = reply.get(timeout=25)
+            except Empty:
+                enroll_slot.clear()
+                f.write(b"ERR timed out\n")
+                f.flush()
+                return
+            f.write(text.encode() if isinstance(text, str) else text)
+            f.flush()
+            return
         if cmd != "ENROLL":
             f.write(b"ERR unknown command\n")
             f.flush()
@@ -101,13 +117,14 @@ def _handle(conn, enroll_slot, event_q, state):
 
 def _status_text(state):
     if not state:
-        return "blanked=0\nstatus=\nmentors=0\nstudents=0\n"
+        return "blanked=0\nstatus=\nmentors=0\nstudents=0\nparents=0\n"
     with state["lock"]:
         return (
             f"blanked={int(state['blanked'])}\n"
             f"status={state['status']}\n"
             f"mentors={len(state['mentors'])}\n"
             f"students={len(state['students'])}\n"
+            f"parents={len(state.get('parents', []))}\n"
         )
 
 

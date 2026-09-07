@@ -31,7 +31,7 @@ sqlite3 /var/lib/tvgui/attendance.sqlite
 SELECT * FROM punches;
 ```
 
-Tag URL: `https://members.teamroboto.org/?name=…&pronounce=…&username=…&role=mentor|student`
+Tag URL: `https://members.teamroboto.org/?name=…&pronounce=…&username=…&role=mentor|student|parent`
 
 HDMI blanks after 10 minutes idle (`tvgui.py blank` / `unblank`). Live shot: `/run/tvgui/screen.png`. New and first-punch tags get a write password.
 

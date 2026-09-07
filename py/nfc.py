@@ -7,7 +7,7 @@ from attendance import IN, OUT, now_secs
 from member import Member, Role
 import ndef
 
-LED = [0xFF, 0x00, 0x40, 0x2E, 0x04, 0x05, 0x01, 0x01, 0x00]
+BUZZER_OFF = [0xFF, 0x00, 0x52, 0x00, 0x00]
 DEBOUNCE = 2
 FACTORY_PWD = bytes([0xFF, 0xFF, 0xFF, 0xFF])
 AUTH0_USER = 0x04
@@ -19,13 +19,15 @@ CFG_PAGES = {
 
 
 def split_here(who):
-    mentors, students = [], []
+    mentors, students, parents = [], [], []
     for m in who:
         if m.role == Role.MENTOR:
             mentors.append(m.name)
+        elif m.role == Role.PARENT:
+            parents.append(m.name)
         else:
             students.append(m.name)
-    return mentors, students
+    return mentors, students, parents
 
 
 def _acr_reader():
@@ -38,7 +40,10 @@ def _acr_reader():
 
 
 def _transmit(conn, apdu):
-    data, sw1, sw2 = conn.transmit(list(apdu))
+    try:
+        data, sw1, sw2 = conn.transmit(list(apdu))
+    except Exception as e:
+        raise RuntimeError(str(e)) from e
     return bytes(data), sw1, sw2
 
 
@@ -54,14 +59,29 @@ def pn532(conn, tag_cmd):
     return body
 
 
+def pn532_thru(conn, tag_cmd):
+    apdu = [0xFF, 0x00, 0x00, 0x00, 2 + len(tag_cmd), 0xD4, 0x42] + list(tag_cmd)
+    body, sw1, sw2 = _transmit(conn, apdu)
+    if (sw1, sw2) != (0x90, 0x00):
+        raise RuntimeError(f"thru sw {sw1:02X} {sw2:02X}")
+    if len(body) >= 3 and body[0] == 0xD5 and body[1] == 0x43:
+        if body[2] != 0:
+            raise RuntimeError(f"thru status {body[2]:02X}")
+        return body[3:]
+    return body
+
+
 def read_pages(conn, page):
     data = pn532(conn, [0x30, page])
     return data[:16] if len(data) > 16 else data
 
 
-def write_page(conn, page, four):
-    pn532(conn, [0xA2, page] + list(four))
-    time.sleep(0.008)
+def write_page(conn, page, four, check=True):
+    try:
+        pn532(conn, [0xA2, page] + list(four))
+    except Exception as e:
+        raise RuntimeError(f"write p{page}: {e}") from e
+    time.sleep(0.08)
 
 
 def cfg_pages_for_storage(size_byte):
@@ -76,15 +96,22 @@ def get_version(conn):
 def cfg_pages(conn):
     try:
         ver = get_version(conn)
-        if len(ver) >= 7:
+        if len(ver) >= 7 and ver[6] in CFG_PAGES:
             return cfg_pages_for_storage(ver[6])
     except Exception:
         pass
-    return cfg_pages_for_storage(0x11)
+    for size in (0x11, 0x13, 0x0F):
+        pages = CFG_PAGES[size]
+        try:
+            read_pages(conn, pages[0])
+            return pages
+        except Exception:
+            continue
+    return CFG_PAGES[0x0F]
 
 
 def pwd_auth(conn, pwd):
-    data = pn532(conn, [0x1B] + list(pwd))
+    data = pn532_thru(conn, [0x1B] + list(pwd))
     return data[:2]
 
 
@@ -107,12 +134,71 @@ def tag_pack():
     return tag_key()[4:6]
 
 
+def inspect_tag(conn):
+    uid = read_pages(conn, 0)
+    cfg0 = None
+    auth0 = 0xFF
+    for p in (0x83, 0x29, 0xE3):
+        try:
+            data = read_pages(conn, p)
+            cfg0 = p
+            auth0 = data[3]
+            break
+        except Exception:
+            continue
+    print(f"inspect cfg0={cfg0} AUTH0={auth0:02x}", flush=True)
+    return {"uid": uid[:8], "cfg0": cfg0, "auth0": auth0}
+
+
+def prepare_write(reader):
+    conn = connect_reader(reader)
+    if conn is None:
+        return None
+    try:
+        info = inspect_tag(conn)
+    except Exception as e:
+        print(f"inspect: {e}", flush=True)
+        try:
+            conn.disconnect()
+        except Exception:
+            pass
+        return None
+    if info["auth0"] > AUTH0_USER:
+        print("auth: none (AUTH0 open)", flush=True)
+        return conn
+    try:
+        pack = pwd_auth(conn, tag_pwd())
+        print(f"auth: ours pack={pack.hex()}", flush=True)
+        return conn
+    except Exception as e:
+        print(f"auth: ours {e}", flush=True)
+        rf_cycle(conn)
+    try:
+        conn.disconnect()
+    except Exception:
+        pass
+    conn = connect_reader(reader)
+    if conn is None:
+        return None
+    try:
+        inspect_tag(conn)
+        pack = pwd_auth(conn, FACTORY_PWD)
+        print(f"auth: factory pack={pack.hex()}", flush=True)
+        return conn
+    except Exception as e:
+        print(f"auth: factory {e}", flush=True)
+        rf_cycle(conn)
+        try:
+            conn.disconnect()
+        except Exception:
+            pass
+        raise RuntimeError("tag is write-protected; password auth failed")
+
+
 def unlock(conn):
     try:
         pwd_auth(conn, tag_pwd())
         return True
-    except RuntimeError as e:
-        print(f"nfc: {e}", flush=True)
     except Exception:
         pass
     try:
@@ -126,8 +212,8 @@ def protect(conn):
     pwd = tag_pwd()
     pack = tag_pack()
     cfg0, cfg1, pwd_pg, pack_pg = cfg_pages(conn)
-    write_page(conn, pwd_pg, pwd)
-    write_page(conn, pack_pg, pack + b"\x00\x00")
+    write_page(conn, pwd_pg, pwd, check=False)
+    write_page(conn, pack_pg, pack + b"\x00\x00", check=False)
     try:
         old1 = read_pages(conn, cfg1)
         access = old1[0] if old1 else 0
@@ -144,9 +230,17 @@ def protect(conn):
         write_page(conn, cfg0, bytes([0x00, 0x00, 0x00, AUTH0_USER]))
 
 
-def beep(conn):
+def silence_reader(reader):
+    conn = reader.createConnection()
     try:
-        _transmit(conn, LED)
+        from smartcard.scard import SCARD_SHARE_DIRECT
+
+        conn.connect(mode=SCARD_SHARE_DIRECT)
+        _transmit(conn, BUZZER_OFF)
+    except Exception:
+        pass
+    try:
+        conn.disconnect()
     except Exception:
         pass
 
@@ -165,13 +259,39 @@ def read_member(conn):
     return ndef.parse_member_from_user_memory(bytes(user))
 
 
-def write_member(conn, member):
-    unlock(conn)
+def write_ndef(conn, member):
     pages = ndef.tag_pages(member)
     for i, page in enumerate(pages):
+        if i == 0:
+            continue
         write_page(conn, 3 + i, page)
+
+
+def write_member(conn, member):
+    write_ndef(conn, member)
     protect(conn)
-    unlock(conn)
+
+
+def dump_tag(conn):
+    lines = []
+    for p in range(0, 16, 4):
+        try:
+            data = read_pages(conn, p)
+            lines.append(f"{p:02x}: {data.hex()}")
+        except Exception as e:
+            lines.append(f"{p:02x}: {e}")
+    for cfg0 in (0x29, 0x83, 0xE3):
+        try:
+            data = read_pages(conn, cfg0)
+            lines.append(f"p{cfg0:02x}: {data[:4].hex()} AUTH0={data[3]:02x}")
+        except Exception as e:
+            lines.append(f"p{cfg0:02x}: {e}")
+    try:
+        acc = read_pages(conn, 0x84)
+        lines.append(f"p84 ACCESS={acc[0]:02x}")
+    except Exception as e:
+        lines.append(f"p84 {e}")
+    return "\n".join(lines) + "\n"
 
 
 def connect_reader(reader):
@@ -183,6 +303,16 @@ def connect_reader(reader):
         return None
 
 
+def rf_cycle(conn):
+    try:
+        _transmit(conn, [0xFF, 0x00, 0x00, 0x00, 0x04, 0xD4, 0x32, 0x01, 0x00])
+        time.sleep(0.05)
+        _transmit(conn, [0xFF, 0x00, 0x00, 0x00, 0x04, 0xD4, 0x32, 0x01, 0x01])
+        time.sleep(0.05)
+    except Exception:
+        pass
+
+
 def read_member_retry(reader, tries=8):
     for _ in range(tries):
         conn = connect_reader(reader)
@@ -190,14 +320,8 @@ def read_member_retry(reader, tries=8):
             time.sleep(0.04)
             continue
         try:
-            ours = unlock(conn)
             m = read_member(conn)
             if m:
-                if not ours:
-                    try:
-                        protect(conn)
-                    except Exception as e:
-                        print(f"protect: {e}", flush=True)
                 return conn, m
         except Exception as e:
             print(f"read: {e}", flush=True)
@@ -212,6 +336,11 @@ def read_member_retry(reader, tries=8):
 class EnrollReq:
     def __init__(self, member, reply_q):
         self.member = member
+        self.reply_q = reply_q
+
+
+class DumpReq:
+    def __init__(self, reply_q):
         self.reply_q = reply_q
 
 
@@ -254,15 +383,44 @@ def _run(store, enroll_slot, event_q):
             event_q.put(("status", "Waiting for reader"))
             time.sleep(1)
             continue
+        silence_reader(reader)
         event_q.put(("status", "Hold your badge over the reader"))
         while _acr_reader() is not None:
             job = enroll_slot.take()
+            if isinstance(job, DumpReq):
+                event_q.put(("status", "Dump: hold tag"))
+                dumped = False
+                err = "timed out"
+                for _ in range(80):
+                    conn = connect_reader(reader)
+                    if conn:
+                        try:
+                            text = dump_tag(conn)
+                            job.reply_q.put(text)
+                            event_q.put(("status", "Dump done"))
+                            dumped = True
+                        except Exception as e:
+                            err = str(e)
+                            job.reply_q.put(f"ERR {e}\n")
+                            dumped = True
+                        try:
+                            conn.disconnect()
+                        except Exception:
+                            pass
+                        hold_status = True
+                        break
+                    time.sleep(0.25)
+                if not dumped:
+                    job.reply_q.put(f"ERR {err}\n")
+                    hold_status = True
+                active = None
+                continue
             if job:
                 event_q.put(("status", f"Enroll {job.member.name}: tap tag to write"))
                 ok = False
                 err = "timed out"
                 for _ in range(200):
-                    conn = connect_reader(reader)
+                    conn = prepare_write(reader)
                     if conn:
                         try:
                             write_member(conn, job.member)
@@ -270,7 +428,6 @@ def _run(store, enroll_slot, event_q):
                             back = read_member(conn)
                             if back != job.member:
                                 raise RuntimeError("read-back mismatch")
-                            beep(conn)
                             event_q.put(("status", f"Enrolled {job.member.name}"))
                             event_q.put(("speak", f"{job.member.pronounce} enrolled"))
                             job.reply_q.put(None)
@@ -309,7 +466,6 @@ def _run(store, enroll_slot, event_q):
                     if member:
                         punch = store.toggle(member, now_secs(), DEBOUNCE)
                         if punch:
-                            beep(conn)
                             greet = "Welcome" if punch.direction == IN else "good bye"
                             event_q.put(
                                 (

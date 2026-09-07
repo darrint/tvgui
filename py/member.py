@@ -5,6 +5,7 @@ URI_HTTPS = 0x04
 class Role:
     MENTOR = "mentor"
     STUDENT = "student"
+    PARENT = "parent"
 
     @staticmethod
     def parse(s):
@@ -13,6 +14,8 @@ class Role:
             return Role.MENTOR
         if v == Role.STUDENT:
             return Role.STUDENT
+        if v == Role.PARENT:
+            return Role.PARENT
         return None
 
 

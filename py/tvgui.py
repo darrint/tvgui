@@ -28,7 +28,7 @@ STATUS_BG = (0x3A, 0x0A, 0x0A)
 def say(phrase):
     try:
         proc = subprocess.run(
-            ["espeak-ng", "-s", "140", "--stdout", "--", phrase],
+            ["espeak-ng", "-v", "en-us", "-s", "140", "--stdout", "--", phrase],
             capture_output=True,
             check=False,
         )
@@ -67,10 +67,10 @@ def db_path():
 def usage():
     print("tvgui.py [kiosk]", file=sys.stderr)
     print(
-        "tvgui.py enroll --name NAME --username USER --role mentor|student [--pronounce TEXT]",
+        "tvgui.py enroll --name NAME --username USER --role mentor|student|parent [--pronounce TEXT]",
         file=sys.stderr,
     )
-    print("tvgui.py blank|unblank|status", file=sys.stderr)
+    print("tvgui.py blank|unblank|status|dump", file=sys.stderr)
 
 
 def blank_secs():
@@ -122,6 +122,7 @@ def save_ui(surf, state):
                 f"status={state['status']}\n"
                 f"mentors={len(state['mentors'])}\n"
                 f"students={len(state['students'])}\n"
+                f"parents={len(state.get('parents', []))}\n"
             )
         with open(ui_path(), "w") as f:
             f.write(text)
@@ -145,7 +146,7 @@ def parse_enroll(args):
         elif args[i] == "--role" and i + 1 < len(args):
             role = Role.parse(args[i + 1])
             if role is None:
-                raise ValueError("role must be mentor or student")
+                raise ValueError("role must be mentor, student, or parent")
             i += 2
         else:
             raise ValueError(f"unknown arg {args[i]}")
@@ -171,7 +172,7 @@ def open_display():
     return win, renderer
 
 
-def compose(size, font_big, font_mid, font_sm, mentors, students, status):
+def compose(size, font_big, font_mid, font_sm, mentors, students, parents, status):
     import pygame
 
     w, h = size
@@ -179,27 +180,31 @@ def compose(size, font_big, font_mid, font_sm, mentors, students, status):
     surf.fill(BG)
     pad = 24
     surf.blit(font_mid.render("Team Roboto", True, RED), (pad, pad))
-    s_label = font_mid.render(f"students ({len(students)})", True, BEIGE)
-    m_label = font_mid.render(f"mentors ({len(mentors)})", True, BEIGE)
-    surf.blit(s_label, (pad + 280, pad))
-    surf.blit(m_label, (w - pad - m_label.get_width(), pad))
 
     status_h = 140
     col_top = pad + 56
     col_h = h - col_top - status_h - pad * 2
-    col_w = (w - pad * 3) // 2
-    left = pygame.Rect(pad, col_top, col_w, col_h)
-    right = pygame.Rect(pad * 2 + col_w, col_top, col_w, col_h)
-    pygame.draw.rect(surf, PANEL, left)
-    pygame.draw.rect(surf, PANEL, right)
-    y = left.y + 20
-    for name in students:
-        surf.blit(font_big.render(name, True, INK), (left.x + 20, y))
-        y += 48
-    y = right.y + 20
-    for name in mentors:
-        surf.blit(font_big.render(name, True, INK), (right.x + 20, y))
-        y += 48
+    col_w = (w - pad * 4) // 3
+    cols = [
+        (pygame.Rect(pad, col_top, col_w, col_h), f"students ({len(students)})", students),
+        (
+            pygame.Rect(pad * 2 + col_w, col_top, col_w, col_h),
+            f"parents ({len(parents)})",
+            parents,
+        ),
+        (
+            pygame.Rect(pad * 3 + col_w * 2, col_top, col_w, col_h),
+            f"mentors ({len(mentors)})",
+            mentors,
+        ),
+    ]
+    for rect, label, names in cols:
+        pygame.draw.rect(surf, PANEL, rect)
+        surf.blit(font_sm.render(label, True, BEIGE), (rect.x + 20, rect.y + 16))
+        y = rect.y + 56
+        for name in names:
+            surf.blit(font_big.render(name, True, INK), (rect.x + 20, y))
+            y += 48
 
     st = pygame.Rect(pad, h - pad - status_h, w - pad * 2, status_h)
     pygame.draw.rect(surf, STATUS_BG, st)
@@ -226,7 +231,7 @@ def kiosk():
 
     store = Store(db_path())
     who = store.who()
-    mentors, students = split_here(who)
+    mentors, students, parents = split_here(who)
     events = queue.Queue()
     slot = EnrollSlot()
     idle_limit = blank_secs()
@@ -236,6 +241,7 @@ def kiosk():
         "blanked": False,
         "mentors": mentors,
         "students": students,
+        "parents": parents,
     }
 
     win, renderer = open_display()
@@ -245,10 +251,10 @@ def kiosk():
     font_sm = pygame.font.Font(FONT, 22)
     status = "Waiting for reader"
     size = (W, H)
-    surf = compose(size, font_big, font_mid, font_sm, mentors, students, status)
+    surf = compose(size, font_big, font_mid, font_sm, mentors, students, parents, status)
     tex = present(renderer, surf)
     save_ui(surf, state)
-    key = (tuple(mentors), tuple(students), status)
+    key = (tuple(mentors), tuple(students), tuple(parents), status)
     last_active = time.monotonic()
     blanked = False
     drew_black = False
@@ -284,7 +290,7 @@ def kiosk():
                     ):
                         woke = True
                 elif kind == "here":
-                    mentors, students = item[1], item[2]
+                    mentors, students, parents = item[1], item[2], item[3]
                     woke = True
                 elif kind == "speak":
                     threading.Thread(target=say, args=(item[1],), daemon=True).start()
@@ -313,7 +319,8 @@ def kiosk():
             state["blanked"] = blanked
             state["mentors"] = mentors
             state["students"] = students
-        new_key = (tuple(mentors), tuple(students), status, blanked)
+            state["parents"] = parents
+        new_key = (tuple(mentors), tuple(students), tuple(parents), status, blanked)
         try:
             if blanked:
                 if not drew_black:
@@ -326,7 +333,9 @@ def kiosk():
                     key = new_key
             elif new_key != key:
                 key = new_key
-                surf = compose(size, font_big, font_mid, font_sm, mentors, students, status)
+                surf = compose(
+                    size, font_big, font_mid, font_sm, mentors, students, parents, status
+                )
                 tex = present(renderer, surf)
                 save_ui(surf, state)
             else:
@@ -342,7 +351,7 @@ def main():
     cmd = args[0] if args else "kiosk"
     if cmd in ("kiosk",):
         kiosk()
-    elif cmd in ("blank", "unblank", "status"):
+    elif cmd in ("blank", "unblank", "status", "dump"):
         try:
             sys.stdout.write(kiosk_cmd(cmd.upper()))
         except Exception as e:
