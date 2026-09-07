@@ -1,7 +1,7 @@
 [Unit]
 Description=tvgui HDMI kiosk (Xorg + openbox + pygame)
-After=seatd.service pcscd.socket
-Wants=seatd.service pcscd.socket
+After=seatd.service pcscd.socket user@1001.service pw-hdmi-hold.service
+Wants=seatd.service pcscd.socket user@1001.service pw-hdmi-hold.service
 
 [Service]
 User=lvuser

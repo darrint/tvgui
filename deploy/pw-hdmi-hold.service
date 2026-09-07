@@ -1,0 +1,16 @@
+[Unit]
+Description=Keep PipeWire HDMI sink running
+After=user@1001.service
+Requires=user@1001.service
+Before=tvgui-kiosk.service
+
+[Service]
+User=lvuser
+Group=lvuser
+Environment=XDG_RUNTIME_DIR=/run/user/1001
+ExecStart=/bin/sh -c 'exec /usr/bin/pw-play --raw --rate 48000 --channels 2 --format s16 --target alsa-hdmi - < /dev/zero'
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

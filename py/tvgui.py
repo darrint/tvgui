@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-import io
 import os
 import queue
 import subprocess
 import sys
 import threading
 import time
-import wave
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -27,38 +25,11 @@ BORDER = (0x3A, 0x3A, 0x3A)
 STATUS_BG = (0x3A, 0x0A, 0x0A)
 
 
-def pad_wav(blob, seconds=0.35):
-    src = io.BytesIO(blob)
-    with wave.open(src, "rb") as w:
-        params = w.getparams()
-        frames = w.readframes(w.getnframes())
-    n = int(params.framerate * seconds)
-    silence = b"\x00" * (n * params.nchannels * params.sampwidth)
-    out = io.BytesIO()
-    with wave.open(out, "wb") as w:
-        w.setparams(params)
-        w.writeframes(silence + frames)
-    return out.getvalue()
-
-
 def say(phrase):
     try:
-        proc = subprocess.run(
-            ["espeak-ng", "-s", "140", "--stdout", "--", phrase],
-            capture_output=True,
-            check=False,
-        )
-        data = proc.stdout
-        if not data:
-            print("espeak-ng: empty", flush=True)
-            return
-        try:
-            data = pad_wav(data)
-        except Exception as e:
-            print(f"wav: {e}", flush=True)
-        subprocess.run(["aplay", "-q", "-D", "tvhdmi"], input=data, check=False)
+        subprocess.run(["spd-say", "-w", "-r", "-20", "--", phrase], check=False)
     except OSError as e:
-        print(f"say: {e}", flush=True)
+        print(f"spd-say: {e}", flush=True)
 
 
 def say_paused(lead, name):

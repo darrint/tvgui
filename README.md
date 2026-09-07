@@ -6,7 +6,7 @@ Python 3 + Debian Trixie packages only. No compile, no cross-build. Pygame on Xo
 
 ## Raspberry Pi 3
 
-Raspberry Pi OS Lite 64-bit (Trixie). SSH/kiosk user **`lvuser`** (FRC RoboRIO/SystemCore convention). HDMI via Xorg. Reader via **pcscd**. Speech: `espeak-ng` → ALSA `tvhdmi` (IEC958). Leading silence pads HDMI lock-in; this device cannot dmix, so PipeWire is unused.
+Raspberry Pi OS Lite 64-bit (Trixie). SSH/kiosk user **`lvuser`** (FRC RoboRIO/SystemCore convention). HDMI via Xorg. Reader via **pcscd**. Speech: speech-dispatcher → PipeWire HDMI sink (`alsa-hdmi`, never suspends).
 
 NTAG write-password comes from `TVGUI_TAG_SECRET` in `/etc/tvgui/kiosk.env` (not in git). systemd loads it via `EnvironmentFile`.
 
