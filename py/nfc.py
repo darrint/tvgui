@@ -449,12 +449,12 @@ def _run(store, enroll_slot, event_q):
                             pass
                         while connect_reader(reader) is not None:
                             time.sleep(0.25)
-                        hold_status = True
                         break
                     time.sleep(0.25)
                 if not done:
                     job.reply_q.put(f"ERR {err}\n")
-                    hold_status = True
+                event_q.put(("status", "Hold your badge over the reader"))
+                hold_status = False
                 active = None
                 continue
             if isinstance(job, DumpReq):
