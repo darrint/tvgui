@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
+import io
 import os
 import queue
 import subprocess
 import sys
 import threading
 import time
+import wave
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -25,24 +27,65 @@ BORDER = (0x3A, 0x3A, 0x3A)
 STATUS_BG = (0x3A, 0x0A, 0x0A)
 
 
+def trim_wav(blob, thresh=250):
+    src = io.BytesIO(blob)
+    with wave.open(src, "rb") as w:
+        params = w.getparams()
+        frames = w.readframes(w.getnframes())
+    nch, sw, rate = params.nchannels, params.sampwidth, params.framerate
+    step = nch * sw
+    n = len(frames) // step
+
+    def loud(i):
+        o = i * step
+        peak = 0
+        for c in range(nch):
+            p = o + c * sw
+            if sw == 2:
+                v = int.from_bytes(frames[p : p + 2], "little", signed=True)
+            else:
+                v = frames[p] - 128
+            peak = max(peak, abs(v))
+        return peak >= thresh
+
+    start, end = 0, n
+    while start < end and not loud(start):
+        start += 1
+    while end > start and not loud(end - 1):
+        end -= 1
+    pad = int(rate * 0.01)
+    start = max(0, start - pad)
+    end = min(n, end + pad)
+    out = io.BytesIO()
+    with wave.open(out, "wb") as w:
+        w.setparams(params)
+        w.writeframes(frames[start * step : end * step])
+    return out.getvalue()
+
+
 def say(phrase):
     try:
         proc = subprocess.run(
-            ["espeak-ng", "-v", "en-us", "-s", "140", "--stdout", "--", phrase],
+            ["espeak-ng", "-v", "en-us", "-s", "140", "-g", "0", "--stdout", "--", phrase],
             capture_output=True,
             check=False,
         )
-        if not proc.stdout:
+        data = proc.stdout
+        if not data:
             print("espeak-ng: empty", flush=True)
             return
+        try:
+            data = trim_wav(data)
+        except Exception as e:
+            print(f"wav: {e}", flush=True)
         env = os.environ.copy()
         runtime = env.get("XDG_RUNTIME_DIR") or "/run/user/1001"
         env.setdefault("XDG_RUNTIME_DIR", runtime)
         env.setdefault("PIPEWIRE_RUNTIME_DIR", runtime)
         env.setdefault("PULSE_SERVER", f"unix:{runtime}/pulse/native")
         subprocess.run(
-            ["pw-play", "--target", "alsa-hdmi", "-"],
-            input=proc.stdout,
+            ["pw-play", "--latency", "20ms", "--target", "alsa-hdmi", "-"],
+            input=data,
             env=env,
             check=False,
         )

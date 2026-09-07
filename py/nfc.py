@@ -434,9 +434,11 @@ def _run(store, enroll_slot, event_q):
                     if conn:
                         try:
                             text, member = scan_report(conn)
-                            if member:
-                                event_q.put(("speak", member.pronounce))
-                            event_q.put(("status", text.split("\n")[0]))
+                            verdict = text.split("\n")[0]
+                            name = member.pronounce if member else "unknown"
+                            spoken = "O K" if verdict == "OK" else "re enroll"
+                            event_q.put(("speak", f"{name}. {spoken}"))
+                            event_q.put(("status", verdict))
                             job.reply_q.put(text)
                             done = True
                         except Exception as e:
