@@ -5,6 +5,7 @@ import time
 
 from attendance import IN, OUT, now_secs
 from member import Member, Role
+from tts import render_member
 import ndef
 
 BUZZER_OFF = [0xFF, 0x00, 0x52, 0x00, 0x00]
@@ -504,6 +505,12 @@ def _run(store, enroll_slot, event_q):
                             event_q.put(("status", f"Enrolled {job.member.name}"))
                             event_q.put(("speak", f"{job.member.pronounce} enrolled"))
                             job.reply_q.put(None)
+                            threading.Thread(
+                                target=render_member,
+                                args=(job.member,),
+                                kwargs={"force": True},
+                                daemon=True,
+                            ).start()
                             ok = True
                         except Exception as e:
                             err = str(e)
@@ -539,14 +546,7 @@ def _run(store, enroll_slot, event_q):
                     if member:
                         punch = store.toggle(member, now_secs(), DEBOUNCE)
                         if punch:
-                            greet = "Welcome" if punch.direction == IN else "good bye"
-                            event_q.put(
-                                (
-                                    "greet",
-                                    f"{greet} {punch.member.role}",
-                                    punch.member.pronounce,
-                                )
-                            )
+                            event_q.put(("greet", punch.member, punch.direction))
                             verb = "badged in" if punch.direction == IN else "badged out"
                             event_q.put(("status", f"{punch.member.name} {verb}"))
                             event_q.put(("here",) + split_here(store.who()))

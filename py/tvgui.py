@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 import datetime
-import io
 import os
 import queue
 import subprocess
 import sys
 import threading
 import time
-import wave
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -15,6 +13,7 @@ from attendance import Store
 from ctl import enroll_client, kiosk_cmd, listen, socket_path
 from member import Member, Role
 from nfc import EnrollSlot, split_here, start as nfc_start
+from tts import backfill, play_greet, say, say_ready
 
 W, H = 1920, 1080
 FONT = "/usr/share/fonts/truetype/freefont/FreeSansBold.ttf"
@@ -26,76 +25,6 @@ INK = (0xF9, 0xF9, 0xF9)
 PANEL = (0x1A, 0x1A, 0x1A)
 BORDER = (0x3A, 0x3A, 0x3A)
 STATUS_BG = (0x3A, 0x0A, 0x0A)
-
-
-def trim_wav(blob, thresh=250):
-    src = io.BytesIO(blob)
-    with wave.open(src, "rb") as w:
-        params = w.getparams()
-        frames = w.readframes(w.getnframes())
-    nch, sw, rate = params.nchannels, params.sampwidth, params.framerate
-    step = nch * sw
-    n = len(frames) // step
-
-    def loud(i):
-        o = i * step
-        peak = 0
-        for c in range(nch):
-            p = o + c * sw
-            if sw == 2:
-                v = int.from_bytes(frames[p : p + 2], "little", signed=True)
-            else:
-                v = frames[p] - 128
-            peak = max(peak, abs(v))
-        return peak >= thresh
-
-    start, end = 0, n
-    while start < end and not loud(start):
-        start += 1
-    while end > start and not loud(end - 1):
-        end -= 1
-    pad = int(rate * 0.01)
-    start = max(0, start - pad)
-    end = min(n, end + pad)
-    out = io.BytesIO()
-    with wave.open(out, "wb") as w:
-        w.setparams(params)
-        w.writeframes(frames[start * step : end * step])
-    return out.getvalue()
-
-
-def say(phrase):
-    try:
-        proc = subprocess.run(
-            ["espeak-ng", "-v", "en-us", "-s", "140", "-g", "0", "--stdout", "--", phrase],
-            capture_output=True,
-            check=False,
-        )
-        data = proc.stdout
-        if not data:
-            print("espeak-ng: empty", flush=True)
-            return
-        try:
-            data = trim_wav(data)
-        except Exception as e:
-            print(f"wav: {e}", flush=True)
-        env = os.environ.copy()
-        runtime = env.get("XDG_RUNTIME_DIR") or "/run/user/1001"
-        env.setdefault("XDG_RUNTIME_DIR", runtime)
-        env.setdefault("PIPEWIRE_RUNTIME_DIR", runtime)
-        env.setdefault("PULSE_SERVER", f"unix:{runtime}/pulse/native")
-        subprocess.run(
-            ["pw-play", "--latency", "20ms", "--target", "alsa-hdmi", "-"],
-            input=data,
-            env=env,
-            check=False,
-        )
-    except OSError as e:
-        print(f"say: {e}", flush=True)
-
-
-def say_paused(lead, name):
-    say(f"{lead}. {name}")
 
 
 def db_path():
@@ -114,7 +43,7 @@ def usage():
         "tvgui.py enroll --name NAME --username USER --role mentor|student|parent [--pronounce TEXT]",
         file=sys.stderr,
     )
-    print("tvgui.py blank|unblank|status|dump|scan", file=sys.stderr)
+    print("tvgui.py blank|unblank|status|dump|scan|tts-backfill", file=sys.stderr)
 
 
 def blank_secs():
@@ -323,9 +252,10 @@ def kiosk():
 
     def _ready():
         time.sleep(1.5)
-        say("Badge system for Team Roboto 4 4 7 ready")
+        say_ready()
 
     threading.Thread(target=_ready, daemon=True).start()
+    threading.Thread(target=backfill, args=(store,), daemon=True).start()
     threading.Thread(
         target=listen, args=(socket_path(), slot, events, state), daemon=True
     ).start()
@@ -359,7 +289,7 @@ def kiosk():
                     woke = True
                 elif kind == "greet":
                     threading.Thread(
-                        target=say_paused, args=(item[1], item[2]), daemon=True
+                        target=play_greet, args=(item[1], item[2]), daemon=True
                     ).start()
                     woke = True
                 elif kind == "blank":
@@ -437,6 +367,12 @@ def main():
                 sys.stdout.flush()
         except KeyboardInterrupt:
             pass
+    elif cmd == "tts-backfill":
+        try:
+            backfill(Store(db_path()), force=False)
+        except Exception as e:
+            print(f"tts-backfill: {e}", file=sys.stderr)
+            sys.exit(1)
     elif cmd in ("blank", "unblank", "status", "dump"):
         try:
             sys.stdout.write(kiosk_cmd(cmd.upper()))

@@ -6,7 +6,7 @@ KIOSK_USER=lvuser
 
 sudo apt-get update
 sudo DEBIAN_FRONTEND=noninteractive apt-get install -y \
-  python3-pygame python3-pyscard python3-speechd sqlite3 espeak-ng \
+  python3-pygame python3-pyscard python3-speechd sqlite3 espeak-ng curl \
   xserver-xorg xinit openbox x11-xserver-utils \
   pcscd libccid \
   pipewire pipewire-pulse wireplumber \
@@ -47,6 +47,28 @@ sudo loginctl enable-linger "$KIOSK_USER"
 sudo systemctl enable --now pcscd.socket seatd pw-hdmi-hold
 sudo systemctl daemon-reload
 sudo systemctl enable tvgui-kiosk pw-hdmi-hold
+
+PIPER_DIR=/usr/local/share/tvgui/piper
+VOICE_DIR=/usr/local/share/tvgui/voices
+if [[ ! -x "$PIPER_DIR/piper" ]]; then
+  tmp=$(mktemp -d)
+  curl -L --fail -o "$tmp/piper.tgz" \
+    https://github.com/rhasspy/piper/releases/download/2023.11.14-2/piper_linux_aarch64.tar.gz
+  tar -xzf "$tmp/piper.tgz" -C "$tmp"
+  sudo mkdir -p "$PIPER_DIR"
+  sudo cp -a "$tmp"/piper/. "$PIPER_DIR/"
+  sudo chmod 755 "$PIPER_DIR/piper"
+  sudo ln -sfn "$PIPER_DIR/piper" /usr/local/bin/piper
+  rm -rf "$tmp"
+fi
+if [[ ! -f "$VOICE_DIR/en_US-bryce-medium.onnx" ]]; then
+  sudo mkdir -p "$VOICE_DIR"
+  sudo curl -L --fail -o "$VOICE_DIR/en_US-bryce-medium.onnx" \
+    https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/bryce/medium/en_US-bryce-medium.onnx
+  sudo curl -L --fail -o "$VOICE_DIR/en_US-bryce-medium.onnx.json" \
+    https://huggingface.co/rhasspy/piper-voices/resolve/main/en/en_US/bryce/medium/en_US-bryce-medium.onnx.json
+  sudo chown -R "${KIOSK_USER}:${KIOSK_USER}" "$VOICE_DIR"
+fi
 
 if [[ ! -f /etc/tvgui/kiosk.env ]]; then
   echo "Missing /etc/tvgui/kiosk.env — add TVGUI_TAG_SECRET=... (Vaultwarden item badge-kiosk NTAG)"

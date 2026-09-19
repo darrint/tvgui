@@ -66,6 +66,18 @@ class Store:
         self.conn.commit()
         return Punch(member, direction)
 
+    def people(self):
+        rows = self.conn.execute(
+            """SELECT username, name, pronounce, role FROM people
+               ORDER BY name COLLATE NOCASE"""
+        ).fetchall()
+        out = []
+        for username, name, pronounce, role in rows:
+            m = Member.new(name, username, pronounce, Role.parse(role) or Role.STUDENT)
+            if m:
+                out.append(m)
+        return out
+
     def who(self):
         rows = self.conn.execute(
             """SELECT p.username, p.name, p.pronounce, p.role, x.ts

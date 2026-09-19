@@ -6,6 +6,15 @@ import unittest
 from attendance import IN, OUT, Store
 from member import Member, Role
 from nfc import AUTH0_USER, cfg_pages_for_storage, tag_pack, tag_pwd
+from tts import (
+    PAUSE_SECS,
+    _silence,
+    _stitch,
+    enrolled_phrase,
+    greet_phrase,
+    lead_prompt,
+    wav_path,
+)
 import ndef
 
 
@@ -88,6 +97,41 @@ class StoreTests(unittest.TestCase):
         m = Member.new("Jane Doe", "jdoe", None, Role.STUDENT)
         self.assertIsNotNone(self.store.toggle(m, 1000, 2))
         self.assertIsNone(self.store.toggle(m, 1001, 2))
+
+    def test_people(self):
+        m = Member.new("Jane Doe", "jdoe", "Jane", Role.STUDENT)
+        self.store.upsert(m)
+        self.assertEqual(self.store.people(), [m])
+
+
+class TtsTests(unittest.TestCase):
+    def test_greet_phrase(self):
+        m = Member.new("Jane Doe", "jdoe", "Jane", Role.STUDENT)
+        self.assertEqual(greet_phrase(m, IN), "Welcome student. Jane")
+        self.assertEqual(greet_phrase(m, OUT), "good bye student. Jane")
+        self.assertEqual(enrolled_phrase(m), "Jane enrolled")
+        self.assertEqual(lead_prompt(m, IN), "_welcome-student")
+        self.assertEqual(lead_prompt(m, OUT), "_goodbye-student")
+        self.assertTrue(wav_path("jdoe", IN).endswith("jdoe-in.wav"))
+
+    def test_stitch_pause(self):
+        import wave
+
+        d = tempfile.mkdtemp()
+        a = os.path.join(d, "a.wav")
+        b = os.path.join(d, "b.wav")
+        out = os.path.join(d, "out.wav")
+        pcm = b"\x00\x01" * 100
+        for path in (a, b):
+            with wave.open(path, "wb") as w:
+                w.setnchannels(1)
+                w.setsampwidth(2)
+                w.setframerate(22050)
+                w.writeframes(pcm)
+        _stitch(out, (a, b))
+        with wave.open(out, "rb") as w:
+            frames = w.readframes(w.getnframes())
+        self.assertEqual(len(frames), 400 + len(_silence(PAUSE_SECS)))
 
 
 if __name__ == "__main__":
